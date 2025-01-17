@@ -933,43 +933,49 @@ def main():
         allow_reentry=True
     )
 
-    conv_handler_gerenciar_assinaturas = ConversationHandler(
-    entry_points=[CommandHandler('gerenciar_assinaturas', comando_gerenciar_assinaturas)],
-    states={
-        ESCOLHER_CLIENTE: [CallbackQueryHandler(escolher_acao, pattern="^cliente_")],
-        ESCOLHER_ACAO: [
-            CallbackQueryHandler(executar_acao, pattern=r"^editar_"),
-            CallbackQueryHandler(executar_acao, pattern=r"^apagar_"),
-            CallbackQueryHandler(executar_acao, pattern=r"^voltar_clientes$"),
-            CallbackQueryHandler(escolher_assinatura, pattern=r"^voltar_acoes_"),
-            CallbackQueryHandler(executar_acao, pattern=r"^voltar_assinaturas_")
-        ],
-        ESCOLHER_ASSINATURA: [
-            CallbackQueryHandler(escolher_assinatura, pattern=r"^assinatura_"),
-            CallbackQueryHandler(executar_acao, pattern=r"^voltar_acoes_"), #Voltar para as ações
-            CallbackQueryHandler(executar_acao, pattern=r"^voltar_clientes$")
-        ],
-        EDITAR_ASSINATURA: [
-            CallbackQueryHandler(executar_acao, pattern=r"^voltar_assinaturas_"),  # Handler para voltar
-        ],
-        APAGAR_ASSINATURA: [
-            CallbackQueryHandler(executar_acao, pattern=r"^voltar_assinaturas_"),  # Handler para voltar
-        ],
-    },
-    fallbacks=[CommandHandler("cancelar", cancelar)],
-    name="gerenciar_assinaturas_conversation",
-    allow_reentry=True
-)
+    conv_handler_gerenciar_assinaturas = ConversationHandler( # ConversationHandler de gerenciar_assinaturas
+        entry_points=[CommandHandler('gerenciar_assinaturas', comando_gerenciar_assinaturas)],
+        states={
+            ESCOLHER_CLIENTE: [CallbackQueryHandler(escolher_acao, pattern="^cliente_")],
+            ESCOLHER_ACAO: [
+                CallbackQueryHandler(executar_acao, pattern=r"^editar_"),
+                CallbackQueryHandler(executar_acao, pattern=r"^apagar_"),
+                CallbackQueryHandler(executar_acao, pattern=r"^voltar_clientes$"),
+                CallbackQueryHandler(escolher_assinatura, pattern=r"^voltar_acoes_"),
+                CallbackQueryHandler(executar_acao, pattern=r"^voltar_assinaturas_")
+            ],
+            ESCOLHER_ASSINATURA: [
+                CallbackQueryHandler(escolher_assinatura, pattern=r"^assinatura_"),
+                CallbackQueryHandler(executar_acao, pattern=r"^voltar_acoes_"), #Voltar para as ações
+                CallbackQueryHandler(executar_acao, pattern=r"^voltar_clientes$")
+            ],
+            EDITAR_ASSINATURA: [
+                CallbackQueryHandler(executar_acao, pattern=r"^voltar_assinaturas_"), # Handler para voltar (espaço normal aqui) # Handler para voltar
+            ],
+            APAGAR_ASSINATURA: [
+                CallbackQueryHandler(executar_acao, pattern=r"^voltar_assinaturas_"), # Handler para voltar (espaço normal aqui)  # Handler para voltar
+            ],
+        },
+        fallbacks=[CommandHandler("cancelar", cancelar)],
+        name="gerenciar_assinaturas_conversation",
+        allow_reentry=True
+    )
 
-    #Removido o handler do clientes ativos
+    listar_pendentes_handler = CommandHandler("listar_pendentes", listar_compras_pendentes) # Handler para listar_pendentes
+
     apagar_cliente_handler = CommandHandler("apagar_cliente", apagar_cliente)
+    confirmar_pagamento_handler = CommandHandler("confirmar_pagamento", confirmar_pagamento)
+    enviar_acesso_handler = CommandHandler("enviar_acesso", enviar_acesso)
+    exibir_info_cliente_handler = CommandHandler("cliente", exibir_info_cliente)
 
-    application.add_handler(conv_handler)
-    application.add_handler(conv_handler_gerenciar_assinaturas)
+    # Adicionando os handlers (ORDEM IMPORTA!)
+    application.add_handler(conv_handler) # ConversationHandler principal PRIMEIRO
+    application.add_handler(conv_handler_gerenciar_assinaturas) # ConversationHandler secundário DEPOIS
+    application.add_handler(listar_pendentes_handler) # Comando listar_pendentes DEPOIS dos ConversationHandlers
     application.add_handler(apagar_cliente_handler)
-    application.add_handler(CommandHandler("confirmar_pagamento", confirmar_pagamento))
-    application.add_handler(CommandHandler("enviar_acesso", enviar_acesso))
-    application.add_handler(CommandHandler("cliente", exibir_info_cliente))
+    application.add_handler(confirmar_pagamento_handler)
+    application.add_handler(enviar_acesso_handler)
+    application.add_handler(exibir_info_cliente_handler)
 
     application.run_polling()
 
