@@ -261,9 +261,11 @@ async def receber_comprovante(update: Update, context: CallbackContext):
         return ConversationHandler.END
 
     compra_id = compra_id_list[0]
-    compra = compras_pendentes.pop(compra_id) #Remove a compra da pendente
+    compra = compras_pendentes.pop(compra_id)
 
     try:
+        os.makedirs("comprovantes", exist_ok=True)
+
         if update.message.document:
             file = await update.message.document.get_file()
             file_path = os.path.join("comprovantes", f"{compra_id}.pdf")
@@ -276,20 +278,20 @@ async def receber_comprovante(update: Update, context: CallbackContext):
             await update.message.reply_text("Por favor, envie um comprovante de pagamento (foto ou documento).")
             return "receber_comprovante"
 
-        # ***MOVENDO A LÓGICA DE CRIAÇÃO DA ASSINATURA PARA AQUI***
+        # Criação da assinatura
         data_assinatura = datetime.datetime.strptime(compra["data_compra"], '%Y-%m-%d').date()
         data_vencimento = datetime.datetime.strptime(compra["data_vencimento"], '%Y-%m-%d').date()
 
-        for produto in compra["produtos"]:
-            if user_id not in historico_compras:
-                historico_compras[user_id] = {"assinaturas": []}
-            elif "assinaturas" not in historico_compras[user_id]:
-                historico_compras[user_id]["assinaturas"] = []
+        if not data_assinatura or not data_vencimento:
+            logging.error(f"Datas inválidas: Assinatura={data_assinatura}, Vencimento={data_vencimento}")
+            await update.message.reply_text("Erro ao processar as datas da compra. Contate o suporte.")
+            return ConversationHandler.END
 
+        for produto in compra["produtos"]:
+            historico_compras.setdefault(user_id, {"assinaturas": []})
             assinatura_existente = next((a for a in historico_compras[user_id]["assinaturas"] if a["produto"] == produto), None)
             if assinatura_existente:
-                assinatura_existente["data_vencimento"] = data_vencimento
-                assinatura_existente["data_assinatura"] = data_assinatura
+                assinatura_existente.update({"data_vencimento": data_vencimento, "data_assinatura": data_assinatura})
             else:
                 historico_compras[user_id]["assinaturas"].append({
                     "produto": produto,
@@ -298,8 +300,8 @@ async def receber_comprovante(update: Update, context: CallbackContext):
                     "dados_acesso": None,
                     "valor": compra["valor"]
                 })
+
         context.bot_data['historico_compras'] = historico_compras
-        context.bot_data["compras_pendentes"] = compras_pendentes
         await context.application.persistence.flush()
 
         await update.message.reply_text("Comprovante recebido e validado. Seus dados de acesso serão enviados em breve.")
@@ -307,19 +309,12 @@ async def receber_comprovante(update: Update, context: CallbackContext):
             chat_id=ADMIN_CHAT_ID,
             text=f"Comprovante recebido de {nome_sobrenome} (@{username}) (ID: {user_id}). Compra ID: {compra_id}"
         )
+        logging.info(f"Compra ID {compra_id} processada com sucesso.")
         return ConversationHandler.END
 
-    except telegram.error.TelegramError as te:
-        logging.error(f"Erro do Telegram ao receber comprovante: {te}")
-        await update.message.reply_text("Ocorreu um erro ao receber o comprovante. Tente novamente mais tarde.")
-        return ConversationHandler.END
-    except (OSError, IOError) as ioe:
-        logging.error(f"Erro de arquivo ao salvar comprovante: {ioe}")
-        await update.message.reply_text("Ocorreu um erro ao salvar o comprovante. Verifique as permissões da pasta.")
-        return ConversationHandler.END
     except Exception as e:
-        logging.exception(f"Erro inesperado ao receber comprovante: {e}")
-        await update.message.reply_text("Ocorreu um erro inesperado. Contate o suporte.")
+        logging.exception(f"Erro ao processar comprovante: {e}")
+        await update.message.reply_text("Houve um erro ao processar seu comprovante. Contate o suporte.")
         return ConversationHandler.END
 
 async def confirmar_pagamento(update: Update, context: CallbackContext):
