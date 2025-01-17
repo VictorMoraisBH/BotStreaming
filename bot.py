@@ -261,11 +261,10 @@ async def receber_comprovante(update: Update, context: CallbackContext):
         return ConversationHandler.END
 
     compra_id = compra_id_list[0]
-    compra = compras_pendentes.pop(compra_id)
+    compra = compras_pendentes.pop(compra_id)  # Remove a compra da pendente
 
     try:
-        os.makedirs("comprovantes", exist_ok=True)
-
+        file_path = None
         if update.message.document:
             file = await update.message.document.get_file()
             file_path = os.path.join("comprovantes", f"{compra_id}.pdf")
@@ -274,11 +273,20 @@ async def receber_comprovante(update: Update, context: CallbackContext):
             photo_file = await update.message.photo[-1].get_file()
             file_path = os.path.join("comprovantes", f"{compra_id}.jpg")
             await photo_file.download_to_drive(file_path)
-        else:
-            await update.message.reply_text("Por favor, envie um comprovante de pagamento (foto ou documento).")
-            return "receber_comprovante"
 
-        # Criação da assinatura
+        if file_path and os.path.exists(file_path):
+            logging.info(f"Arquivo de comprovante salvo em: {file_path}")
+
+            # Envia o comprovante para o administrador (sem usar o Cloudinary)
+            with open(file_path, 'rb') as file:
+                await context.bot.send_photo(
+                    chat_id=ADMIN_CHAT_ID,
+                    photo=file,
+                    caption=f"Comprovante recebido de {nome_sobrenome} (@{username}) - Compra ID: {compra_id}"
+                )
+            logging.info(f"Foto enviada para o administrador: {file_path}")
+
+        # Criação da assinatura no histórico
         data_assinatura = datetime.datetime.strptime(compra["data_compra"], '%Y-%m-%d').date()
         data_vencimento = datetime.datetime.strptime(compra["data_vencimento"], '%Y-%m-%d').date()
 
@@ -288,8 +296,8 @@ async def receber_comprovante(update: Update, context: CallbackContext):
             return ConversationHandler.END
 
         for produto in compra["produtos"]:
-            historico_compras.setdefault(user_id, {"assinaturas": []})
-            assinatura_existente = next((a for a in historico_compras[user_id]["assinaturas"] if a["produto"] == produto), None)
+            assinaturas = historico_compras.get(user_id, {}).get('assinaturas', [])
+            assinatura_existente = next((a for a in assinaturas if a["produto"] == produto), None)
             if assinatura_existente:
                 assinatura_existente.update({"data_vencimento": data_vencimento, "data_assinatura": data_assinatura})
             else:
@@ -307,9 +315,8 @@ async def receber_comprovante(update: Update, context: CallbackContext):
         await update.message.reply_text("Comprovante recebido e validado. Seus dados de acesso serão enviados em breve.")
         await context.bot.send_message(
             chat_id=ADMIN_CHAT_ID,
-            text=f"Comprovante recebido de {nome_sobrenome} (@{username}) (ID: {user_id}). Compra ID: {compra_id}"
+            text=f"Comprovante recebido de {nome_sobrenome} (@{username}) - Compra ID: {compra_id} foi processada."
         )
-        logging.info(f"Compra ID {compra_id} processada com sucesso.")
         return ConversationHandler.END
 
     except Exception as e:
