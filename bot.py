@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 
 ESCOLHER_CLIENTE, ESCOLHER_ACAO, ESCOLHER_ASSINATURA, EDITAR_ASSINATURA, APAGAR_ASSINATURA = range(5)
 
+ESPERANDO_COMPROVANTE = "esperando_comprovante"
+
 ADMIN_CHAT_ID = "5759744104"  # Substitua pelo seu ID real
 TOKEN = "7745116159:AAGwXir_Asi5KqfU5GaEAUc7Vf4uQHtZc3E" # Substitua pelo token do seu bot
 
@@ -117,9 +119,9 @@ async def menu_cliente(update: Update, context: CallbackContext):
                 mensagem += "\nPara suporte, envie um email para seu_email@exemplo.com"
                 await update.message.reply_text(mensagem)
             else:
-                await update.message.reply_text("Você ainda não possui nenhum stream ativo.\nPara suporte, envie um email para seu_email@exemplo.com")
+                await update.message.reply_text("Você ainda não possui nenhum stream ativo.\nPara suporte, envie um email para suportestreamingvg@gmail.com")
         else:
-            await update.message.reply_text("Você ainda não possui nenhum stream ativo.\nPara suporte, envie um email para seu_email@exemplo.com")
+            await update.message.reply_text("Você ainda não possui nenhum stream ativo.\nPara suporte, envie um email para suportestreamingvg@gmail.com")
         return ConversationHandler.END
     elif resposta == "Assinar mais um streaming":
         await update.message.reply_text(
@@ -224,7 +226,7 @@ async def processar_compra(update: Update, context: CallbackContext):
             "data_vencimento": str(data_vencimento),
             "compra_id": compra_id
         }
-        context.bot_data["compras_pendentes"] = compras_pendentes
+        context.bot_data[ESPERANDO_COMPROVANTE] = True
 
         context.user_data.pop("carrinho", None)
 
@@ -251,78 +253,42 @@ async def receber_comprovante(update: Update, context: CallbackContext):
     user_id = str(update.message.from_user.id)
     nome_sobrenome = f"{update.message.from_user.first_name} {update.message.from_user.last_name or ''}".strip()
     username = update.message.from_user.username or "Usuário sem username"
-    historico_compras = context.bot_data.get('historico_compras', {})
-    compras_pendentes = context.bot_data.get('compras_pendentes', {})
-
-    compra_id_list = [compra_id for compra_id, compra_info in compras_pendentes.items() if compra_info.get("user_id") == user_id]
-
-    if not compra_id_list:
-        await update.message.reply_text("Você precisa ter um pedido pendente antes de enviar um comprovante.")
-        return ConversationHandler.END
-
-    compra_id = compra_id_list[0]
-    compra = compras_pendentes.pop(compra_id)  # Remove a compra da pendente
 
     try:
-        file_path = None
-        if update.message.document:
-            file = await update.message.document.get_file()
-            file_path = os.path.join("comprovantes", f"{compra_id}.pdf")
-            await file.download_to_drive(file_path)
-        elif update.message.photo:
-            photo_file = await update.message.photo[-1].get_file()
-            file_path = os.path.join("comprovantes", f"{compra_id}.jpg")
-            await photo_file.download_to_drive(file_path)
+        if context.bot_data.get(ESPERANDO_COMPROVANTE, False):
+            photo = update.message.photo[-1]
+            message = await context.bot.send_photo(
+                chat_id=ADMIN_CHAT_ID,
+                photo=photo.file_id,
+                caption=f"Comprovante recebido de {nome_sobrenome} (@{username}) - User ID: {user_id}"
+            )
+            logging.info(f"Foto enviada para o administrador {ADMIN_CHAT_ID}: Message ID: {message.message_id}")
 
-        if file_path and os.path.exists(file_path):
-            logging.info(f"Arquivo de comprovante salvo em: {file_path}")
+        elif update.message.document:
+            document = update.message.document
+            message = await context.bot.send_document(
+                chat_id=ADMIN_CHAT_ID,
+                document=document.file_id,
+                caption=f"Comprovante (Documento) recebido de {nome_sobrenome} (@{username}) - User ID: {user_id}"
+            )
+            logging.info(f"Documento enviado para o administrador {ADMIN_CHAT_ID}: Message ID: {message.message_id}")
+            context.bot_data[ESPERANDO_COMPROVANTE] = False # Limpa o estado global
+        else:
+            await update.message.reply_text("Não estou aguardando um comprovante agora.")
+            return ConversationHandler.END  # Continua esperando o comprovante
 
-            # Envia o comprovante para o administrador (sem usar o Cloudinary)
-            with open(file_path, 'rb') as file:
-                await context.bot.send_photo(
-                    chat_id=ADMIN_CHAT_ID,
-                    photo=file,
-                    caption=f"Comprovante recebido de {nome_sobrenome} (@{username}) - Compra ID: {compra_id}"
-                )
-            logging.info(f"Foto enviada para o administrador: {file_path}")
-
-        # Criação da assinatura no histórico
-        data_assinatura = datetime.datetime.strptime(compra["data_compra"], '%Y-%m-%d').date()
-        data_vencimento = datetime.datetime.strptime(compra["data_vencimento"], '%Y-%m-%d').date()
-
-        if not data_assinatura or not data_vencimento:
-            logging.error(f"Datas inválidas: Assinatura={data_assinatura}, Vencimento={data_vencimento}")
-            await update.message.reply_text("Erro ao processar as datas da compra. Contate o suporte.")
-            return ConversationHandler.END
-
-        for produto in compra["produtos"]:
-            assinaturas = historico_compras.get(user_id, {}).get('assinaturas', [])
-            assinatura_existente = next((a for a in assinaturas if a["produto"] == produto), None)
-            if assinatura_existente:
-                assinatura_existente.update({"data_vencimento": data_vencimento, "data_assinatura": data_assinatura})
-            else:
-                historico_compras[user_id]["assinaturas"].append({
-                    "produto": produto,
-                    "data_vencimento": data_vencimento,
-                    "data_assinatura": data_assinatura,
-                    "dados_acesso": None,
-                    "valor": compra["valor"]
-                })
-
-        context.bot_data['historico_compras'] = historico_compras
-        await context.application.persistence.flush()
-
-        await update.message.reply_text("Comprovante recebido e validado. Seus dados de acesso serão enviados em breve.")
+        await update.message.reply_text("Comprovante recebido. Aguarde a confirmação do administrador.")
         await context.bot.send_message(
             chat_id=ADMIN_CHAT_ID,
-            text=f"Comprovante recebido de {nome_sobrenome} (@{username}) - Compra ID: {compra_id} foi processada."
+            text=f"Comprovante recebido de {nome_sobrenome} (@{username}) - User ID: {user_id}."
         )
-        return ConversationHandler.END
+
+        return ESPERANDO_COMPROVANTE # Permanece no estado de receber comprovante
 
     except Exception as e:
-        logging.exception(f"Erro ao processar comprovante: {e}")
+        logging.exception(f"Erro ao processar comprovante do usuário {user_id} ({nome_sobrenome}): {e}")
         await update.message.reply_text("Houve um erro ao processar seu comprovante. Contate o suporte.")
-        return ConversationHandler.END
+        return ConversationHandler.END # Encerra em caso de erro
 
 async def confirmar_pagamento(update: Update, context: CallbackContext):
     if str(update.message.from_user.id) != str(ADMIN_CHAT_ID):
@@ -927,7 +893,8 @@ def main():
             "menu_cliente": [MessageHandler(filters.TEXT, menu_cliente)],
             "escolher_servicos": [MessageHandler(filters.TEXT & ~filters.COMMAND, escolher_streaming)],
             "contato": [MessageHandler(filters.TEXT, processar_compra)],
-            "receber_comprovante": [MessageHandler(filters.PHOTO | filters.Document.ALL, receber_comprovante)],
+            "receber_comprovante": [MessageHandler(filters.PHOTO | filters.Document.ALL, receber_comprovante)],  # Inclui o estado aqui
+            ESPERANDO_COMPROVANTE: [MessageHandler(filters.PHOTO | filters.Document.ALL, receber_comprovante)] # Adiciona o estado aqui (no handler correto)
         },
         fallbacks=[CommandHandler("cancelar", cancelar)],
         name="main_conversation",
@@ -935,7 +902,8 @@ def main():
         allow_reentry=True
     )
 
-    conv_handler_gerenciar_assinaturas = ConversationHandler( # ConversationHandler de gerenciar_assinaturas
+
+    conv_handler_gerenciar_assinaturas = ConversationHandler(
         entry_points=[CommandHandler('gerenciar_assinaturas', comando_gerenciar_assinaturas)],
         states={
             ESCOLHER_CLIENTE: [CallbackQueryHandler(escolher_acao, pattern="^cliente_")],
@@ -952,15 +920,17 @@ def main():
                 CallbackQueryHandler(executar_acao, pattern=r"^voltar_clientes$")
             ],
             EDITAR_ASSINATURA: [
-                CallbackQueryHandler(executar_acao, pattern=r"^voltar_assinaturas_"), # Handler para voltar (espaço normal aqui) # Handler para voltar
+                CallbackQueryHandler(executar_acao, pattern=r"^voltar_assinaturas_"), # Handler para voltar (espaço normal aqui) # Handler para voltar
             ],
             APAGAR_ASSINATURA: [
-                CallbackQueryHandler(executar_acao, pattern=r"^voltar_assinaturas_"), # Handler para voltar (espaço normal aqui)  # Handler para voltar
+                CallbackQueryHandler(executar_acao, pattern=r"^voltar_assinaturas_"), # Handler para voltar (espaço normal aqui)  # Handler para voltar
             ],
+            ESPERANDO_COMPROVANTE: [MessageHandler(filters.PHOTO | filters.Document.ALL, receber_comprovante)] # Adiciona o estado aqui (no handler correto)
         },
         fallbacks=[CommandHandler("cancelar", cancelar)],
         name="gerenciar_assinaturas_conversation",
-        allow_reentry=True
+        allow_reentry=True,
+        per_message=True
     )
 
     listar_pendentes_handler = CommandHandler("listar_pendentes", listar_compras_pendentes) # Handler para listar_pendentes
